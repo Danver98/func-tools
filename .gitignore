@@ -1,0 +1,7 @@
+*.txt
+__pycache__/
+*.csv
+*.log
+*.xls
+league-*
+.vscode/
