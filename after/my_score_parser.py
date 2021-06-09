@@ -28,15 +28,15 @@ def apply_with_index_and_args(collection, function, *helper_args):
         function(collection[i], i, *helper_args)
 
 
-def parse_leagues(driver, url):
-    pattern = re.compile("^.*(Cup|Copa|Кубок|кубок).*$")
-    for index, league in enumerate(driver.find_elements_by_class_name("head_ab")):
-        league_name = league.find_element_by_class_name(
-            "name").text.strip()
-        when((league.find_element_by_tag_name('span').text == "Таблица" and pattern.search(league_name) == None), parse_single_league,
-             url, driver, league, league_name, index)
-             
-#Вынесли условие проверки из when, абстрагировали сам паттерн
+# def parse_leagues(driver, url):
+#     pattern = re.compile("^.*(Cup|Copa|Кубок|кубок).*$")
+#     for index, league in enumerate(driver.find_elements_by_class_name("head_ab")):
+#         league_name = league.find_element_by_class_name(
+#             "name").text.strip()
+#         when((league.find_element_by_tag_name('span').text == "Таблица" and pattern.search(league_name) == None), parse_single_league,
+#              url, driver, league, league_name, index)
+
+# Вынесли условие проверки из when, абстрагировали сам паттерн
 def item_is_table_and_out_of_pattern(pattern, item):
     name = item.find_element_by_class_name("name").text.strip()
     tag_elem = item.find_element_by_tag_name('span')
@@ -44,7 +44,9 @@ def item_is_table_and_out_of_pattern(pattern, item):
         return True
     return False
 
-#Фильтруем по функции, проверяющей на соответствие паттерну
+# Фильтруем по функции, проверяющей на соответствие паттерну
+
+
 def filter_with_pattern(collection, pattern_condition_function, pattern):
     new_collection = []
     for item in collection:
@@ -82,35 +84,43 @@ def get_prepared_driver(url):
         lambda x: x.find_element_by_class_name("table-main"))
     return driver
 
+#будем повторять выполнение, пока не добъёмся результата
+def do_to_result(f):
+    def wrapper(arg):
+        while True:
+            driver = None
+            try:
+                f(driver, arg)
+            except TimeoutError as e:
+                on_exception(exception=null, e.__class__.__name__, 
+                            lambda driver: when(driver != None,
+                            when(isinstance(driver, webdriver.Firefox), lambda driver: driver.close())))
+                continue
+            except OSError as e:
+                on_exception(e, e.__class__.__name__, 
+                            lambda driver: when(driver != None,
+                            when(isinstance(driver, webdriver.Firefox), lambda driver: driver.close())))
+                continue
+            else:
+                driver.quit()
+                break
+    return wrapper
 
-def parse(url):
-    while True:
-        driver = None
-        try:
-            driver = getPreparedDriver(url)
-            parse_leagues(driver, url)
-            driver.close()
-        except TimeoutError:
-            print("=========Timeout error=========")
-            if driver != None:
-                if isinstance(driver, webdriver.Firefox):
-                    driver.close()
-            continue
-        except OSError as e:
-            print(e)
-            print("=======Waiting...=======")
-            if driver != None:
-                if isinstance(driver, webdriver.Firefox):
-                    driver.close()
-            continue
-        else:
-            driver.quit()
-            break
+#Создадим вспомогательные функции
+def parse(driver, url):
+    driver = getPreparedDriver(url)
+    parse_leagues(driver, url)
+    driver.close()
+
+
+def on_exception(exception=null, message, final, *args):
+    when(exception, lambda exception: print(exception))
+    print(message)
+    final(*args)
 
 
 def league_results(url, driver, league_name, index):
     link_pattern = re.compile(".*\('(.+)'\);")
-    # сохраним ссылку на родительское окно
     parent_window = driver.current_window_handle
     file_name = "leagues/league-{}.csv".format(index + 1)
     with open(file_name, 'a', encoding="utf-8", newline='') as csv_file:
@@ -147,7 +157,6 @@ def league_results(url, driver, league_name, index):
                     driver.close()
                     driver.switch_to_window(current_window)
                 driver.close()
-    # переключение на родительское перенесено на более вложенный уровень
     driver.switch_to_window(parent_window)
 
 
@@ -204,4 +213,6 @@ def write_team(writer, team):
 
 
 if __name__ == '__main__':
+    #Обернём исходную функцию
+    parse = do_to_result(parse)
     parse("https://www.myscore.ru")
