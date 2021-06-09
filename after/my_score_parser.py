@@ -17,19 +17,15 @@ from match import Match
 from team import Team
 
 
-def map_with_args(collection, function):
+def filter_leagues_by_pattern_and_then_apply_func(collection, pattern, pattern_condition_function, apply, *helper_args):
+    filtered_collection = filter_with_pattern(
+        collection, pattern_condition_function, pattern)
+    apply_with_index_and_args(filtered_collection, apply, *helper_args)
+
+
+def apply_with_index_and_args(collection, function, *helper_args):
     for i in range(len(collection)):
-        function(collection[i], i)
-
-
-def when(condition, then, *args):
-    if(condition):
-        then(*args)
-
-
-def parse_single_league(url, driver, league, league_name, index):
-    league.find_element_by_tag_name('span').click()
-    league_results(url, driver, league_name, index)
+        function(collection[i], i, *helper_args)
 
 
 def parse_leagues(driver, url):
@@ -39,6 +35,43 @@ def parse_leagues(driver, url):
             "name").text.strip()
         when((league.find_element_by_tag_name('span').text == "Таблица" and pattern.search(league_name) == None), parse_single_league,
              url, driver, league, league_name, index)
+             
+#Вынесли условие проверки из when, абстрагировали сам паттерн
+def item_is_table_and_out_of_pattern(pattern, item):
+    name = item.find_element_by_class_name("name").text.strip()
+    tag_elem = item.find_element_by_tag_name('span')
+    if tag_elem.text == "Таблица" and pattern.search(name) == None:
+        return True
+    return False
+
+#Фильтруем по функции, проверяющей на соответствие паттерну
+def filter_with_pattern(collection, pattern_condition_function, pattern):
+    new_collection = []
+    for item in collection:
+        when(pattern_condition_function(pattern, item), lambda new_collection,
+             item: new_collection.append(item))
+    return new_collection
+
+
+def when(condition, then, *args):
+    if(condition):
+        then(*args)
+
+
+def parse_single_league(league, index, url, driver):
+    league_name = league.find_element_by_class_name("name").text.strip()
+    league.find_element_by_tag_name('span').click()
+    league_results(url, driver, league_name, index)
+
+
+def parse_leagues(driver, url):
+    collection = driver.find_elements_by_class_name("head_ab")
+    pattern = re.compile("^.*(Cup|Copa|Кубок|кубок).*$")
+    pattern_condition_function = item_is_table_and_out_of_pattern
+    helper_args = [url, driver]
+    filter_leagues_by_pattern_and_then_apply_func(
+        collection, pattern, pattern_condition_function, parse_single_league, helper_args)
+
 
 def get_prepared_driver(url):
     driver = webdriver.Firefox()
@@ -77,7 +110,7 @@ def parse(url):
 
 def league_results(url, driver, league_name, index):
     link_pattern = re.compile(".*\('(.+)'\);")
-    #сохраним ссылку на родительское окно
+    # сохраним ссылку на родительское окно
     parent_window = driver.current_window_handle
     file_name = "leagues/league-{}.csv".format(index + 1)
     with open(file_name, 'a', encoding="utf-8", newline='') as csv_file:
