@@ -16,27 +16,25 @@ from selenium.webdriver.support.ui import WebDriverWait
 from match import Match
 from team import Team
 
-def parse(url, sport=None, profile=None, file_path=None):
+
+def parse(url):
     while True:
         driver = None
         try:
             driver = webdriver.Firefox(firefox_profile=profile)
             driver.implicitly_wait(5)
             driver.get(url)
-            sport = sport or "soccer"
-            driver.find_element_by_class_name(sport).click()
+            driver.find_element_by_class_name("soccer").click()
             WebDriverWait(driver, timeout=30).until(
                 lambda x: x.find_element_by_class_name("table-main"))
             parent_window = driver.current_window_handle
             pattern = re.compile("^.*(Cup|Copa|Кубок|кубок).*$")
             for index, league in enumerate(driver.find_elements_by_class_name("head_ab")):
-                os.system('cls')
                 league_name = league.find_element_by_class_name(
                     "name").text.strip()
                 if league.find_element_by_tag_name('span').text == "Таблица" and pattern.search(league_name) == None:
-                    os.system("cls")
                     league.find_element_by_tag_name('span').click()
-                    league_results(url, driver, sport, league_name, index)
+                    league_results(url, driver, league_name, index)
                     driver.switch_to_window(parent_window)
             driver.close()
         except TimeoutError:
@@ -56,7 +54,8 @@ def parse(url, sport=None, profile=None, file_path=None):
             driver.quit()
             break
 
-def league_results(url, driver, sport, league_name, index):
+
+def league_results(url, driver, league_name, index):
     link_pattern = re.compile(".*\('(.+)'\);")
     parent_window = driver.current_window_handle
     file_name = "leagues/league-{}.csv".format(index + 1)
@@ -89,14 +88,15 @@ def league_results(url, driver, sport, league_name, index):
                     driver.switch_to_window(tab_handle)
                     next_ = str(url+link)
                     team = parse_football_team(
-                        sport, league_name, team_name, driver, next_)
+                        league_name, team_name, driver, next_)
                     write_team(writer, team)
                     driver.close()
                     driver.switch_to_window(current_window)
                 driver.close()
 
-def parse_football_team(sports, league_name, team_name, driver):
-    team = Team(sports, league_name, team_name)
+
+def parse_football_team(league_name, team_name, driver):
+    team = Team("football", league_name, team_name)
     WebDriverWait(driver, timeout=30).until(
         lambda x: x.find_element_by_id("fs-results"))
     soup = BeautifulSoup(driver.page_source, 'lxml')
@@ -140,11 +140,12 @@ def parse_football_team(sports, league_name, team_name, driver):
                 Match(date, team_name, team_rival, self_score, rival_score, place, maintime))
     return team
 
+
 def write_team(writer, team):
     for match in team.matches:
         writer.writerow((team.sport, team.league, team.name, match.rival, match.date, match.result(), match.match_score(), match.odd_even(
         ), match.total(), match.score, match.ind_odd_even(), '-', '-', match.place, match.overtime(), team.next['date'], team.next['rival']))
 
+
 if __name__ == '__main__':
     parse("https://www.myscore.ru")
-

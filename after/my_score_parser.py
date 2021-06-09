@@ -17,17 +17,28 @@ from match import Match
 from team import Team
 
 
+def map_with_args(collection, function):
+    for i in range(len(collection)):
+        function(collection[i], i)
+
+
+def when(condition, then, *args):
+    if(condition):
+        then(*args)
+
+
+def parse_single_league(url, driver, league, league_name, index):
+    league.find_element_by_tag_name('span').click()
+    league_results(url, driver, league_name, index)
+
+
 def parse_leagues(driver, url):
-    parent_window = driver.current_window_handle
     pattern = re.compile("^.*(Cup|Copa|Кубок|кубок).*$")
     for index, league in enumerate(driver.find_elements_by_class_name("head_ab")):
         league_name = league.find_element_by_class_name(
             "name").text.strip()
-        if league.find_element_by_tag_name('span').text == "Таблица" and pattern.search(league_name) == None:
-            league.find_element_by_tag_name('span').click()
-            league_results(url, driver, league_name, index)
-            driver.switch_to_window(parent_window)
-
+        when((league.find_element_by_tag_name('span').text == "Таблица" and pattern.search(league_name) == None), parse_single_league,
+             url, driver, league, league_name, index)
 
 def get_prepared_driver(url):
     driver = webdriver.Firefox()
@@ -66,6 +77,7 @@ def parse(url):
 
 def league_results(url, driver, league_name, index):
     link_pattern = re.compile(".*\('(.+)'\);")
+    #сохраним ссылку на родительское окно
     parent_window = driver.current_window_handle
     file_name = "leagues/league-{}.csv".format(index + 1)
     with open(file_name, 'a', encoding="utf-8", newline='') as csv_file:
@@ -102,6 +114,8 @@ def league_results(url, driver, league_name, index):
                     driver.close()
                     driver.switch_to_window(current_window)
                 driver.close()
+    # переключение на родительское перенесено на более вложенный уровень
+    driver.switch_to_window(parent_window)
 
 
 def parse_football_team(league_name, team_name, driver):
