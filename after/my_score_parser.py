@@ -16,16 +16,16 @@ from selenium.webdriver.support.ui import WebDriverWait
 from match import Match
 from team import Team
 
-
+#Функции без учёта индексов
 def filter_leagues_by_pattern_and_then_apply_func(collection, pattern, pattern_condition_function, apply, *helper_args):
     filtered_collection = filter_with_pattern(
         collection, pattern_condition_function, pattern)
-    apply_with_index_and_args(filtered_collection, apply, *helper_args)
+    apply_with_args(filtered_collection, apply, *helper_args)
 
 
-def apply_with_index_and_args(collection, function, *helper_args):
-    for i in range(len(collection)):
-        function(collection[i], i, *helper_args)
+def apply_with_args(collection, function, *helper_args):
+    for item in collection:
+        function(item, *helper_args)
 
 
 # def parse_leagues(driver, url):
@@ -60,10 +60,10 @@ def when(condition, then, *args):
         then(*args)
 
 
-def parse_single_league(league, index, url, driver):
+def parse_single_league(league, url, driver):
     league_name = league.find_element_by_class_name("name").text.strip()
     league.find_element_by_tag_name('span').click()
-    league_results(url, driver, league_name, index)
+    parse_and_write_league_results(url, driver, league_name)
 
 
 def parse_leagues(driver, url):
@@ -84,7 +84,7 @@ def get_prepared_driver(url):
         lambda x: x.find_element_by_class_name("table-main"))
     return driver
 
-#будем повторять выполнение, пока не добъёмся результата
+
 def do_to_result(f):
     def wrapper(arg):
         while True:
@@ -92,21 +92,21 @@ def do_to_result(f):
             try:
                 f(driver, arg)
             except TimeoutError as e:
-                on_exception(exception=null, e.__class__.__name__, 
-                            lambda driver: when(driver != None,
-                            when(isinstance(driver, webdriver.Firefox), lambda driver: driver.close())))
+                on_exception(exception=null, e.__class__.__name__,
+                             lambda driver: when(driver != None,
+                                                 when(isinstance(driver, webdriver.Firefox), lambda driver: driver.close())))
                 continue
             except OSError as e:
-                on_exception(e, e.__class__.__name__, 
-                            lambda driver: when(driver != None,
-                            when(isinstance(driver, webdriver.Firefox), lambda driver: driver.close())))
+                on_exception(e, e.__class__.__name__,
+                             lambda driver: when(driver != None,
+                                                 when(isinstance(driver, webdriver.Firefox), lambda driver: driver.close())))
                 continue
             else:
                 driver.quit()
                 break
     return wrapper
 
-#Создадим вспомогательные функции
+
 def parse(driver, url):
     driver = getPreparedDriver(url)
     parse_leagues(driver, url)
@@ -118,45 +118,59 @@ def on_exception(exception=null, message, final, *args):
     print(message)
     final(*args)
 
-
-def league_results(url, driver, league_name, index):
+#Эту функцию можно доработать
+def process_team(item, driver, parent_window, url, league_name, writer):
+    team_name = item.find_element_by_tag_name(
+        "a").text.strip()  # ?
+    onclick = item.find_element_by_tag_name(
+        "a").get_attribute("onclick")
     link_pattern = re.compile(".*\('(.+)'\);")
-    parent_window = driver.current_window_handle
-    file_name = "leagues/league-{}.csv".format(index + 1)
+    link = link_pattern.search(onclick).group(1)
+    current_window = driver.current_window_handle
+    driver.switch_to_window(parent_window)
+    driver.execute_script("window.open();")
+    tab_handle = None
+    for index, handle in enumerate(driver.window_handles):
+        if index == 1:
+            tab_handle = handle
+            driver.switch_to_window(handle)
+            driver.get(url+link+'results')
+            break
+    driver.switch_to_window(tab_handle)
+    next_ = str(url+link)
+    team = parse_football_team(
+        league_name, team_name, driver, next_)
+    write_team(writer, team)
+    driver.close()
+    driver.switch_to_window(current_window)
+
+
+def process_teams(handle, driver, parent_window, url, league_name, writer):
+    driver.switch_to_window(handle)
+    WebDriverWait(driver, timeout=10).until(
+        lambda x: x.find_element_by_class_name("glib-stats-data"))
+    # команды
+    apply_with_args(driver.find_elements_by_class_name(
+        "team_name_span"), process_team, driver, parent_window, url, league_name, writer)
+    driver.close()
+
+
+def process_handle(writer, handle, driver, parent_window, url, league_name):
+    when(handle != parent_window, lambda driver, handle, parent_window, url,
+         league_name: process_teams(handle, driver, parent_window, url, league_name, writer))
+
+
+def parse_and_write_to_csv(file_name, f, *args):
     with open(file_name, 'a', encoding="utf-8", newline='') as csv_file:
         writer = csv.writer(csv_file)
         writer.writerow(('Вид спорта', 'Лига', 'Команда',	'Матч',	'Дата', 'Итог',	'Счёт', 'Чёт/нечет', 'Тотал', 'Инд.тотал команды',
                         'Инд. чёт/ нечет', 'Тотал б/м [тотал]', 'Инд.тотал б/м [тотал]', 'Дом / Выезд', 'Овертайм', 'След. матч', 'Соперник'))
-        for handle in driver.window_handles:
-            if handle != parent_window:
-                driver.switch_to_window(handle)
-                WebDriverWait(driver, timeout=10).until(
-                    lambda x: x.find_element_by_class_name("glib-stats-data"))
-                # команды
-                for span in driver.find_elements_by_class_name("team_name_span"):
-                    team_name = span.find_element_by_tag_name(
-                        "a").text.strip()  # ?
-                    onclick = span.find_element_by_tag_name(
-                        "a").get_attribute("onclick")
-                    link = link_pattern.search(onclick).group(1)
-                    current_window = driver.current_window_handle
-                    driver.switch_to_window(parent_window)
-                    driver.execute_script("window.open();")
-                    tab_handle = None
-                    for index, handle in enumerate(driver.window_handles):
-                        if index == 1:
-                            tab_handle = handle
-                            driver.switch_to_window(handle)
-                            driver.get(url+link+'results')
-                            break
-                    driver.switch_to_window(tab_handle)
-                    next_ = str(url+link)
-                    team = parse_football_team(
-                        league_name, team_name, driver, next_)
-                    write_team(writer, team)
-                    driver.close()
-                    driver.switch_to_window(current_window)
-                driver.close()
+        f(writer, *args)
+
+def parse_and_write_league_results(url, driver, league_name):
+    parent_window = driver.current_window_handle
+    file_name = "leagues/Лига-{}.csv".format(league_name)
+    parse_and_write_to_csv(file_name, apply_with_args, driver.window_handles, process_handle, driver, parent_window, url, league_name)
     driver.switch_to_window(parent_window)
 
 
@@ -213,6 +227,6 @@ def write_team(writer, team):
 
 
 if __name__ == '__main__':
-    #Обернём исходную функцию
+    # Обернём исходную функцию
     parse = do_to_result(parse)
     parse("https://www.myscore.ru")
