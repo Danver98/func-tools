@@ -17,7 +17,7 @@ from functools import partial
 from match import Match
 from team import Team
 
-
+# проверка на соответствие требуемым условиям
 def item_has_text_and_out_of_pattern(item, text, pattern):
     name = item.find_element_by_class_name("name").text.strip()
     tag_elem = item.find_element_by_tag_name('span')
@@ -29,6 +29,7 @@ def item_has_text_and_out_of_pattern(item, text, pattern):
 def parse_single_league(league, url, driver):
     league_name = league.find_element_by_class_name("name").text.strip()
     league.find_element_by_tag_name('span').click()
+    # переименованная league_results()
     parse_and_write_league_results(url, driver, league_name)
 
 
@@ -37,7 +38,9 @@ def parse_leagues(driver, url):
     pattern = re.compile("^.*(Cup|Copa|Кубок|кубок).*$")
     text = "Таблица"
     helper_args = [url, driver]
+    # выберем нужные
     filtered_leagues = list(filter(partial(item_has_text_and_out_of_pattern, text=text, pattern=pattern), collection)
+    # применим функцию
     list(map(lambda league: parse_single_league(
         league, *helper_args), filtered_leagues))
 
@@ -94,7 +97,7 @@ def process_team(item, driver, parent_window, url, league_name, writer):
     current_window=driver.current_window_handle
     driver.switch_to_window(parent_window)
     driver.execute_script("window.open();")
-    tab_handle = driver.window_handles[1]
+    tab_handle=driver.window_handles[1]
     driver.switch_to_window(tab_handle)
     driver.get(url+link+'results')
     driver.switch_to_window(tab_handle)
@@ -139,6 +142,34 @@ def parse_and_write_league_results(url, driver, league_name):
         lambda handle: process_handle(handle, *args), driver.window_handles))
     driver.switch_to_window(parent_window)
 
+def get_parsed_match(tag, team_name):
+    place="дом"
+    date=tag.find('td', class_='time').text.split()[0]
+    team_self=tag.find('td', class_='team-home').text
+    team_rival=tag.find('td', class_='team-away').text
+    td_score=tag.find('td', class_='score')
+    if len(td_score.contents) > 1:   # если есть доп время или пенальти
+        self_score=int(td_score.contents[0].split(':')[0].strip())
+        rival_score=int(td_score.contents[0].split(':')[1].strip())
+        aet=td_score.find('span', class_='aet').text.strip()
+        pat=re.compile("^\((.+)\)$")
+        sc=pat.search(aet).group(1).strip().split(':')
+        maintime={
+            'home-score': int(sc[0].strip()), 'guest-score': int(sc[1].strip())}
+    else:
+        self_score=int(
+            tag.find('td', class_='score').text.split(':')[0].strip())
+        rival_score=int(
+            tag.find('td', class_='score').text.split(':')[1].strip())
+        maintime=None
+    # на выезде
+    if re.search(team_name, team_rival):
+        team_rival=team_self
+        self_score, rival_score=rival_score, self_score
+        if maintime:
+            maintime['home-score'], maintime['guest-score']=maintime['guest-score'], maintime['home-score']
+        place="выезд"
+    return Match(date, team_name, team_rival, self_score, rival_score, place, maintime)
 
 def parse_football_team(league_name, team_name, driver):
     team=Team("soccer", league_name, team_name)
@@ -146,45 +177,14 @@ def parse_football_team(league_name, team_name, driver):
         lambda x: x.find_element_by_id("fs-results"))
     soup=BeautifulSoup(driver.page_source, 'lxml')
     div=soup.find('div', id='fs-results')
-    flag=False
-    match_count=0
     for tbody in div.find_all("tbody"):
-        if flag == True:
+        if len(team.matches) > 15:
             break
         for tr in tbody.find_all("tr"):
-            match_count += 1
-            if match_count > 15:
-                flag=True
+            if len(team.matches) > 15:
                 break
-            place="дом"
-            date=tr.find('td', class_='time').text.split()[0]
-            team_self=tr.find('td', class_='team-home').text
-            team_rival=tr.find('td', class_='team-away').text
-            td_score=tr.find('td', class_='score')
-            if len(td_score.contents) > 1:   # если есть доп время или пенальти
-                self_score=int(td_score.contents[0].split(':')[0].strip())
-                rival_score=int(td_score.contents[0].split(':')[1].strip())
-                aet=td_score.find('span', class_='aet').text.strip()
-                pat=re.compile("^\((.+)\)$")
-                sc=pat.search(aet).group(1).strip().split(':')
-                maintime={
-                    'home-score': int(sc[0].strip()), 'guest-score': int(sc[1].strip())}
-            else:
-                self_score=int(
-                    tr.find('td', class_='score').text.split(':')[0].strip())
-                rival_score=int(
-                    tr.find('td', class_='score').text.split(':')[1].strip())
-                maintime=None
-            if re.search(team_name, team_rival):
-                team_rival=team_self
-                self_score, rival_score=rival_score, self_score
-                if maintime:
-                    maintime['home-score'], maintime['guest-score']=maintime['guest-score'], maintime['home-score']
-                place="выезд"
-            team.matches.append(
-                Match(date, team_name, team_rival, self_score, rival_score, place, maintime))
+            team.matches.append(get_parsed_match(tr, team_name))
     return team
-
 
 def write_team(writer, team):
     for match in team.matches:
